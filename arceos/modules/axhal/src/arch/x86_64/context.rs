@@ -1,11 +1,11 @@
 use core::{arch::asm, fmt};
 use memory_addr::VirtAddr;
-
+use memory_addr::PhysAddr;
+use x86_64::instructions::interrupts;
 /// Saved registers when a trap (interrupt or exception) occurs.
-#[allow(missing_docs)]
 #[repr(C)]
-#[derive(Debug, Default, Clone)]
-pub struct TrapFrame {
+#[derive(Debug, Default, Clone, Copy)]
+pub struct GeneralRegisters {
     pub rax: u64,
     pub rcx: u64,
     pub rdx: u64,
@@ -21,12 +21,19 @@ pub struct TrapFrame {
     pub r13: u64,
     pub r14: u64,
     pub r15: u64,
+}
 
-    // Pushed by `trap.S`
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy)]
+/// Saved registers and context when a trap (interrupt or exception) occurs on x86_64.
+pub struct TrapFrame {
+    // Registers saved manually (order must match exactly)
+    pub regs: GeneralRegisters,
+
+    // Manually pushed in trap.S
     pub vector: u64,
     pub error_code: u64,
-
-    // Pushed by CPU
+    // CPU auto-pushed part (always exists if from userspace)
     pub rip: u64,
     pub cs: u64,
     pub rflags: u64,
@@ -38,6 +45,168 @@ impl TrapFrame {
     /// Whether the trap is from userspace.
     pub const fn is_user(&self) -> bool {
         self.cs & 0b11 == 3
+    }
+    pub fn arg0(&self) -> usize {
+        self.regs.rax as usize
+    }
+    pub fn arg1(&self) -> usize {
+        self.regs.rdi as usize
+    }
+    pub fn arg2(&self) -> usize {
+        self.regs.rsi as usize
+    }
+    pub fn arg3(&self) -> usize {
+        self.regs.rdx as usize
+    }
+    pub fn arg4(&self) -> usize {
+        self.regs.r10 as usize
+    }
+    pub fn arg5(&self) -> usize {
+        self.regs.r8 as usize
+    }
+}
+
+/// Context to enter user space.
+#[cfg(feature = "uspace")]
+pub struct UspaceContext(TrapFrame);
+
+#[cfg(feature = "uspace")]
+impl UspaceContext {
+    /// Creates an empty context with all registers set to zero.
+    pub fn empty() -> Self {
+        Self(Default::default())
+    }
+
+    /// Creates a new context with the given entry point, user stack pointer,
+    /// and the argument.
+    pub fn new(entry: usize, ustack_top: VirtAddr) -> Self {
+        const USER_CS: u64 = 0x1B;
+        const USER_SS: u64 = 0x23;
+        const USER_RFLAGS: u64 = 0x202; // IF = 1
+        let mut tf = TrapFrame::default();
+        tf.rip = entry as u64;
+        tf.rsp = ustack_top.as_usize() as u64;
+        tf.cs = USER_CS;
+        tf.ss = USER_SS;
+        tf.rflags = USER_RFLAGS;
+        Self(tf)
+    }
+
+    /// Creates a new context from the given [`TrapFrame`].
+    pub const fn from(trap_frame: &TrapFrame) -> Self {
+        Self(*trap_frame)
+    }
+
+    /// Gets the instruction pointer.
+    pub const fn get_ip(&self) -> u64 {
+        self.0.rip as _
+    }
+
+    /// Gets the stack pointer.
+    pub const fn get_sp(&self) -> u64 {
+        self.0.rsp as _
+    }
+
+    /// Sets the instruction pointer.
+    pub const fn set_ip(&mut self, pc: u64) {
+        self.0.rip = pc;
+    }
+
+    /// Sets the stack pointer.
+    pub const fn set_sp(&mut self, sp: u64) {
+        self.0.rsp = sp;
+    }
+
+    /// Sets the return value register.
+    pub const fn set_retval(&mut self, a0: u64) {
+        self.0.regs.rax = a0;
+    }
+
+    /// Enters user space.
+    ///
+    /// It restores the user registers and jumps to the user entry point
+    /// (saved in `rip`).
+    /// When an exception or syscall occurs, the kernel stack pointer is
+    /// switched to `kstack_top`.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe because it changes processor mode and the stack.
+    #[no_mangle]
+    pub unsafe fn enter_uspace(&self, kstack_top: VirtAddr) -> ! {
+        interrupts::disable(); // 关本地中断
+        let tf = &self.0;
+
+        // --------------- 在内核栈构造返回帧 ----------------
+        let mut rsp = kstack_top.as_usize() as u64;
+
+        #[inline(always)]
+        unsafe fn push(mut rsp: u64, val: u64) -> u64 {
+            rsp -= 8;
+            *(rsp as *mut u64) = val;
+            rsp
+        }
+
+        // (1) **先压 IRETQ 帧**（底部）
+        rsp = push(rsp, tf.ss);
+        rsp = push(rsp, tf.rsp); // 用户栈顶
+        rsp = push(rsp, tf.rflags);
+        rsp = push(rsp, tf.cs);
+        rsp = push(rsp, tf.rip);
+
+        // (2) **再压通用寄存器**，从 rax 开始，直到 r15 最后
+        rsp = push(rsp, tf.regs.rax);
+        rsp = push(rsp, tf.regs.rbx);
+        rsp = push(rsp, tf.regs.rcx);
+        rsp = push(rsp, tf.regs.rdx);
+        rsp = push(rsp, tf.regs.rsi);
+        rsp = push(rsp, tf.regs.rdi);
+        rsp = push(rsp, tf.regs.rbp);
+        rsp = push(rsp, tf.regs.r8);
+        rsp = push(rsp, tf.regs.r9);
+        rsp = push(rsp, tf.regs.r10);
+        rsp = push(rsp, tf.regs.r11);
+        rsp = push(rsp, tf.regs.r12);
+        rsp = push(rsp, tf.regs.r13);
+        rsp = push(rsp, tf.regs.r14);
+        rsp = push(rsp, tf.regs.r15); // <== 最后压，栈顶就是 r15
+
+        log::debug!(
+            "enter_uspace: rip={:#x}, rsp={:#x}, cs={:#x}, ss={:#x}",
+            tf.rip,
+            tf.rsp,
+            tf.cs,
+            tf.ss
+        );
+
+        // --------------- 切栈并跳到用户态 ------------------
+        core::arch::asm!(
+            // 如果内核进栈时用过 swapgs，这里需要再 swapgs 一次
+            // "swapgs",
+
+            "mov    rsp, {stack}",     // 切到我们刚才铺好的帧
+
+            // 依次恢复寄存器：与 push 顺序完全相反
+            "pop    r15",
+            "pop    r14",
+            "pop    r13",
+            "pop    r12",
+            "pop    r11",
+            "pop    r10",
+            "pop    r9",
+            "pop    r8",
+            "pop    rbp",
+            "pop    rdi",
+            "pop    rsi",
+            "pop    rdx",
+            "pop    rcx",
+            "pop    rbx",
+            "pop    rax",
+            "swapgs",
+            "iretq",                   // 弹 IRETQ 帧，跳到 ring-3
+            stack = in(reg) rsp,
+            options(noreturn),
+        )
     }
 }
 
@@ -138,6 +307,8 @@ pub struct TaskContext {
     pub rsp: u64,
     /// Thread Local Storage (TLS).
     pub fs_base: usize,
+    /// The root of the page table (CR3 on x86_64, SATP on riscv).
+    pub page_table_root: PhysAddr,
     /// Extended states, i.e., FP/SIMD states.
     #[cfg(feature = "fp_simd")]
     pub ext_state: ExtendedState,
@@ -150,6 +321,7 @@ impl TaskContext {
             kstack_top: va!(0),
             rsp: 0,
             fs_base: 0,
+            page_table_root: PhysAddr::from_usize(0),
             #[cfg(feature = "fp_simd")]
             ext_state: ExtendedState::default(),
         }
@@ -177,6 +349,17 @@ impl TaskContext {
         self.fs_base = tls_area.as_usize();
     }
 
+    /// Changes the page table root (`cr3` register for x86_64).
+    ///
+    /// If not set, the kernel page table root is used (obtained by
+    /// [`axhal::paging::kernel_page_table_root`][1]).
+    ///
+    /// [1]: crate::paging::kernel_page_table_root
+    #[cfg(feature = "uspace")]
+    pub fn set_page_table_root(&mut self, cr3: PhysAddr) {
+        self.page_table_root = cr3;
+    }
+
     /// Switches to another task.
     ///
     /// It first saves the current task's context from CPU to this place, and then
@@ -196,7 +379,6 @@ impl TaskContext {
     }
 }
 
-#[naked]
 unsafe extern "C" fn context_switch(_current_stack: &mut u64, _next_stack: &u64) {
     asm!(
         "

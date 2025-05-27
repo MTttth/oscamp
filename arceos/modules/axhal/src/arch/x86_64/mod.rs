@@ -11,6 +11,8 @@ use memory_addr::{MemoryAddr, PhysAddr, VirtAddr};
 use x86::{controlregs, msr, tlb};
 use x86_64::instructions::interrupts;
 
+#[cfg(feature = "uspace")]
+pub use self::context::UspaceContext;
 pub use self::context::{ExtendedState, FxsaveArea, TaskContext, TrapFrame};
 pub use self::gdt::GdtStruct;
 pub use self::idt::IdtStruct;
