@@ -34,7 +34,9 @@ clean:
         cargo clean -p $(TARGET) --target $$(make --no-print-directory ARCH=$$arch get-target-triple) --release 2>/dev/null || true; \
     done
 
-	
 FORCE:
 
-.PHONY: FORCE
+.PHONY: FORCE get-target-triple
+
+get-target-triple:
+	@echo $(TARGET_TRIPLE)

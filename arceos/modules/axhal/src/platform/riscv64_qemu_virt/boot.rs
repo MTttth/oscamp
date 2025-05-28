@@ -4,7 +4,7 @@ use axconfig::{PHYS_VIRT_OFFSET, TASK_STACK_SIZE};
 
 #[link_section = ".bss.stack"]
 static mut BOOT_STACK: [u8; TASK_STACK_SIZE] = [0; TASK_STACK_SIZE];
-
+// #[feature(asm_const)]
 #[link_section = ".data.boot_page_table"]
 static mut BOOT_PT_SV39: [u64; 512] = [0; 512];
 
@@ -22,7 +22,6 @@ unsafe fn init_mmu() {
 }
 
 /// The earliest entry point for the primary CPU.
-#[naked]
 #[no_mangle]
 #[link_section = ".text.boot"]
 unsafe extern "C" fn _start() -> ! {
@@ -60,7 +59,6 @@ unsafe extern "C" fn _start() -> ! {
 
 /// The earliest entry point for secondary CPUs.
 #[cfg(feature = "smp")]
-#[naked]
 #[no_mangle]
 #[link_section = ".text.boot"]
 unsafe extern "C" fn _start_secondary() -> ! {

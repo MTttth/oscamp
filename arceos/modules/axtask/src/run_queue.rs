@@ -173,6 +173,7 @@ impl AxRunQueue {
         next_task.set_preempt_pending(false);
         next_task.set_state(TaskState::Running);
         if prev_task.ptr_eq(&next_task) {
+            debug!("no need to switch, same task");
             return;
         }
 
@@ -184,7 +185,7 @@ impl AxRunQueue {
             // but won't be dropped until `gc_entry()` is called.
             assert!(Arc::strong_count(prev_task.as_task_ref()) > 1);
             assert!(Arc::strong_count(&next_task) >= 1);
-
+            debug!("switching context: {} -> {}", prev_task.id_name(), next_task.id_name());
             CurrentTask::set_current(prev_task, next_task);
             (*prev_ctx_ptr).switch_to(&*next_ctx_ptr);
         }

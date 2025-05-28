@@ -27,6 +27,7 @@ $(TARGET_ELF):
 	@echo "Compiling for $(ARCH) architecture..."
 	@cargo build -p $(TARGET) --target $(TARGET_TRIPLE) --release
 
+
 clean:
 	@rm -rf ./$(TARGET).*
 	@for arch in riscv64 x86_64 aarch64 ; do \

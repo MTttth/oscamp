@@ -1,4 +1,4 @@
-use core::{arch::asm, fmt};
+use core::{arch::naked_asm, fmt};
 use memory_addr::VirtAddr;
 use memory_addr::PhysAddr;
 use x86_64::instructions::interrupts;
@@ -134,10 +134,8 @@ impl UspaceContext {
     /// This function is unsafe because it changes processor mode and the stack.
     #[no_mangle]
     pub unsafe fn enter_uspace(&self, kstack_top: VirtAddr) -> ! {
-        interrupts::disable(); // 关本地中断
+        interrupts::disable();
         let tf = &self.0;
-
-        // --------------- 在内核栈构造返回帧 ----------------
         let mut rsp = kstack_top.as_usize() as u64;
 
         #[inline(always)]
@@ -146,15 +144,12 @@ impl UspaceContext {
             *(rsp as *mut u64) = val;
             rsp
         }
-
-        // (1) **先压 IRETQ 帧**（底部）
         rsp = push(rsp, tf.ss);
-        rsp = push(rsp, tf.rsp); // 用户栈顶
+        rsp = push(rsp, tf.rsp);
         rsp = push(rsp, tf.rflags);
         rsp = push(rsp, tf.cs);
         rsp = push(rsp, tf.rip);
 
-        // (2) **再压通用寄存器**，从 rax 开始，直到 r15 最后
         rsp = push(rsp, tf.regs.rax);
         rsp = push(rsp, tf.regs.rbx);
         rsp = push(rsp, tf.regs.rcx);
@@ -169,24 +164,12 @@ impl UspaceContext {
         rsp = push(rsp, tf.regs.r12);
         rsp = push(rsp, tf.regs.r13);
         rsp = push(rsp, tf.regs.r14);
-        rsp = push(rsp, tf.regs.r15); // <== 最后压，栈顶就是 r15
+        rsp = push(rsp, tf.regs.r15);
 
-        log::debug!(
-            "enter_uspace: rip={:#x}, rsp={:#x}, cs={:#x}, ss={:#x}",
-            tf.rip,
-            tf.rsp,
-            tf.cs,
-            tf.ss
-        );
-
-        // --------------- 切栈并跳到用户态 ------------------
+        // 切栈并跳到用户态
         core::arch::asm!(
-            // 如果内核进栈时用过 swapgs，这里需要再 swapgs 一次
             // "swapgs",
-
-            "mov    rsp, {stack}",     // 切到我们刚才铺好的帧
-
-            // 依次恢复寄存器：与 push 顺序完全相反
+            "mov    rsp, {stack}",
             "pop    r15",
             "pop    r14",
             "pop    r13",
@@ -203,7 +186,7 @@ impl UspaceContext {
             "pop    rbx",
             "pop    rax",
             "swapgs",
-            "iretq",                   // 弹 IRETQ 帧，跳到 ring-3
+            "iretq",
             stack = in(reg) rsp,
             options(noreturn),
         )
@@ -379,8 +362,9 @@ impl TaskContext {
     }
 }
 
+#[unsafe(naked)]
 unsafe extern "C" fn context_switch(_current_stack: &mut u64, _next_stack: &u64) {
-    asm!(
+    naked_asm!(
         "
         push    rbp
         push    rbx
@@ -398,6 +382,5 @@ unsafe extern "C" fn context_switch(_current_stack: &mut u64, _next_stack: &u64)
         pop     rbx
         pop     rbp
         ret",
-        options(noreturn),
     )
 }

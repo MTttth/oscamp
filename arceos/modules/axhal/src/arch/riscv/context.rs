@@ -1,7 +1,7 @@
-use core::arch::asm;
-use memory_addr::VirtAddr;
+use core::arch::{asm, naked_asm};
 #[cfg(feature = "uspace")]
 use memory_addr::PhysAddr;
+use memory_addr::VirtAddr;
 
 include_asm_marcos!();
 
@@ -281,43 +281,41 @@ impl UspaceContext {
     }
 }
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn context_switch(_current_task: &mut TaskContext, _next_task: &TaskContext) {
-    asm!(
+    naked_asm!(
         "
         // save old context (callee-saved registers)
-        STR     ra, a0, 0
-        STR     sp, a0, 1
-        STR     s0, a0, 2
-        STR     s1, a0, 3
-        STR     s2, a0, 4
-        STR     s3, a0, 5
-        STR     s4, a0, 6
-        STR     s5, a0, 7
-        STR     s6, a0, 8
-        STR     s7, a0, 9
-        STR     s8, a0, 10
-        STR     s9, a0, 11
-        STR     s10, a0, 12
-        STR     s11, a0, 13
+        sd ra, 0*8(a0)
+        sd sp, 1*8(a0)
+        sd s0, 2*8(a0)
+        sd s1, 3*8(a0)
+        sd s2, 4*8(a0)
+        sd s3, 5*8(a0)
+        sd s4, 6*8(a0)
+        sd s5, 7*8(a0)
+        sd s6, 8*8(a0)
+        sd s7, 9*8(a0)
+        sd s8, 10*8(a0)
+        sd s9, 11*8(a0)
+        sd s10, 12*8(a0)
+        sd s11, 13*8(a0)
 
         // restore new context
-        LDR     s11, a1, 13
-        LDR     s10, a1, 12
-        LDR     s9, a1, 11
-        LDR     s8, a1, 10
-        LDR     s7, a1, 9
-        LDR     s6, a1, 8
-        LDR     s5, a1, 7
-        LDR     s4, a1, 6
-        LDR     s3, a1, 5
-        LDR     s2, a1, 4
-        LDR     s1, a1, 3
-        LDR     s0, a1, 2
-        LDR     sp, a1, 1
-        LDR     ra, a1, 0
-
+        ld s11,13*8(a1)
+        ld s10,12*8(a1)
+        ld s9, 11*8(a1)
+        ld s8, 10*8(a1)
+        ld s7, 9*8(a1)
+        ld s6, 8*8(a1)
+        ld s5, 7*8(a1)
+        ld s4, 6*8(a1)
+        ld s3, 5*8(a1)
+        ld s2, 4*8(a1)
+        ld s1, 3*8(a1)
+        ld s0, 2*8(a1)
+        ld sp, 1*8(a1)
+        ld ra, 0*8(a1)
         ret",
-        options(noreturn),
     )
 }

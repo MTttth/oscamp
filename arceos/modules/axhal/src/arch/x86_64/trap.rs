@@ -1,7 +1,7 @@
 use page_table_entry::MappingFlags;
 use x86::{controlregs::cr2, irq::*};
 use x86_64::structures::idt::PageFaultErrorCode;
-
+use crate::trap::PAGE_FAULT;
 use super::context::TrapFrame;
 
 core::arch::global_asm!(include_str!("trap.S"));
@@ -13,6 +13,9 @@ fn handle_page_fault(tf: &TrapFrame) {
     let access_flags = err_code_to_flags(tf.error_code)
         .unwrap_or_else(|e| panic!("Invalid #PF error code: {:#x}", e));
     let vaddr = va!(unsafe { cr2() });
+    debug!("Page Fault Handle Function number: {}", PAGE_FAULT.len());
+    debug!("Page Fault @ {:#x}, fault_vaddr={:#x}, error_code={:#x} ({:?})",
+           tf.rip, vaddr, tf.error_code, access_flags);
     if !handle_trap!(PAGE_FAULT, vaddr, access_flags, tf.is_user()) {
         panic!(
             "Unhandled {} #PF @ {:#x}, fault_vaddr={:#x}, error_code={:#x} ({:?}):\n{:#x?}",

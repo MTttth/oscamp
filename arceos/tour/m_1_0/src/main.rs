@@ -44,7 +44,8 @@ fn main() {
         Arc::new(Mutex::new(uspace)),
         UspaceContext::new(APP_ENTRY.into(), ustack_top),
     );
-
+    debug!("User task spawned: {}", user_task.id_name());
+    debug!("User task entry: {:#x?}", unsafe { user_task.task_ext_ptr() });
     // Wait for user process to exit ...
     let exit_code = user_task.join();
     ax_println!("monolithic kernel exit [{:?}] normally!", exit_code);
