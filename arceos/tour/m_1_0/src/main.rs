@@ -36,16 +36,21 @@ fn main() {
     }
 
     // Init user stack.
-    let ustack_top = init_user_stack(&mut uspace, true).unwrap();
+    let ustack_top = init_user_stack(&mut uspace, false).unwrap();
     ax_println!("New user address space: {:#x?}", uspace);
 
     // Let's kick off the user process.
     let user_task = task::spawn_user_task(
+            
         Arc::new(Mutex::new(uspace)),
+        
+        #[cfg(target_arch = "riscv64")]
         UspaceContext::new(APP_ENTRY.into(), ustack_top),
+        #[cfg(target_arch = "aarch64")]
+        UspaceContext::new(APP_ENTRY.into(), ustack_top, 0),
+        #[cfg(target_arch = "x86_64")]
+        UspaceContext::new(APP_ENTRY, ustack_top, 0),
     );
-    debug!("User task spawned: {}", user_task.id_name());
-    debug!("User task entry: {:#x?}", unsafe { user_task.task_ext_ptr() });
     // Wait for user process to exit ...
     let exit_code = user_task.join();
     ax_println!("monolithic kernel exit [{:?}] normally!", exit_code);

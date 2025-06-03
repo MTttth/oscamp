@@ -1,11 +1,10 @@
 use core::{arch::naked_asm, fmt};
 use memory_addr::VirtAddr;
-use memory_addr::PhysAddr;
-use x86_64::instructions::interrupts;
 /// Saved registers when a trap (interrupt or exception) occurs.
+#[allow(missing_docs)]
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]
-pub struct GeneralRegisters {
+pub struct TrapFrame {
     pub rax: u64,
     pub rcx: u64,
     pub rdx: u64,
@@ -21,19 +20,12 @@ pub struct GeneralRegisters {
     pub r13: u64,
     pub r14: u64,
     pub r15: u64,
-}
 
-#[repr(C)]
-#[derive(Debug, Default, Clone, Copy)]
-/// Saved registers and context when a trap (interrupt or exception) occurs on x86_64.
-pub struct TrapFrame {
-    // Registers saved manually (order must match exactly)
-    pub regs: GeneralRegisters,
-
-    // Manually pushed in trap.S
+    // Pushed by `trap.S`
     pub vector: u64,
     pub error_code: u64,
-    // CPU auto-pushed part (always exists if from userspace)
+
+    // Pushed by CPU
     pub rip: u64,
     pub cs: u64,
     pub rflags: u64,
@@ -42,27 +34,39 @@ pub struct TrapFrame {
 }
 
 impl TrapFrame {
+    /// Gets the 0th syscall argument.
+    pub const fn arg0(&self) -> usize {
+        self.rdi as _
+    }
+
+    /// Gets the 1st syscall argument.
+    pub const fn arg1(&self) -> usize {
+        self.rsi as _
+    }
+
+    /// Gets the 2nd syscall argument.
+    pub const fn arg2(&self) -> usize {
+        self.rdx as _
+    }
+
+    /// Gets the 3rd syscall argument.
+    pub const fn arg3(&self) -> usize {
+        self.r10 as _
+    }
+
+    /// Gets the 4th syscall argument.
+    pub const fn arg4(&self) -> usize {
+        self.r8 as _
+    }
+
+    /// Gets the 5th syscall argument.
+    pub const fn arg5(&self) -> usize {
+        self.r9 as _
+    }
+
     /// Whether the trap is from userspace.
     pub const fn is_user(&self) -> bool {
         self.cs & 0b11 == 3
-    }
-    pub fn arg0(&self) -> usize {
-        self.regs.rax as usize
-    }
-    pub fn arg1(&self) -> usize {
-        self.regs.rdi as usize
-    }
-    pub fn arg2(&self) -> usize {
-        self.regs.rsi as usize
-    }
-    pub fn arg3(&self) -> usize {
-        self.regs.rdx as usize
-    }
-    pub fn arg4(&self) -> usize {
-        self.regs.r10 as usize
-    }
-    pub fn arg5(&self) -> usize {
-        self.regs.r8 as usize
     }
 }
 
@@ -73,53 +77,62 @@ pub struct UspaceContext(TrapFrame);
 #[cfg(feature = "uspace")]
 impl UspaceContext {
     /// Creates an empty context with all registers set to zero.
-    pub fn empty() -> Self {
-        Self(Default::default())
+    pub const fn empty() -> Self {
+        unsafe { core::mem::MaybeUninit::zeroed().assume_init() }
     }
 
     /// Creates a new context with the given entry point, user stack pointer,
     /// and the argument.
-    pub fn new(entry: usize, ustack_top: VirtAddr) -> Self {
-        const USER_CS: u64 = 0x1B;
-        const USER_SS: u64 = 0x23;
-        const USER_RFLAGS: u64 = 0x202; // IF = 1
-        let mut tf = TrapFrame::default();
-        tf.rip = entry as u64;
-        tf.rsp = ustack_top.as_usize() as u64;
-        tf.cs = USER_CS;
-        tf.ss = USER_SS;
-        tf.rflags = USER_RFLAGS;
-        Self(tf)
+    pub fn new(entry: usize, ustack_top: VirtAddr, arg0: usize) -> Self {
+        use crate::arch::GdtStruct;
+        use x86_64::registers::rflags::RFlags;
+        Self(TrapFrame {
+            rdi: arg0 as _,
+            rip: entry as _,
+            cs: GdtStruct::UCODE64_SELECTOR.0 as _,
+            #[cfg(feature = "irq")]
+            rflags: RFlags::INTERRUPT_FLAG.bits(), // IOPL = 0, IF = 1
+            rsp: ustack_top.as_usize() as _,
+            ss: GdtStruct::UDATA_SELECTOR.0 as _,
+            ..Default::default()
+        })
     }
 
     /// Creates a new context from the given [`TrapFrame`].
-    pub const fn from(trap_frame: &TrapFrame) -> Self {
-        Self(*trap_frame)
+    ///
+    /// It copies almost all registers except `CS` and `SS` which need to be
+    /// set to the user segment selectors.
+    pub const fn from(tf: &TrapFrame) -> Self {
+        use crate::arch::GdtStruct;
+        let mut tf = *tf;
+        tf.cs = GdtStruct::UCODE64_SELECTOR.0 as _;
+        tf.ss = GdtStruct::UDATA_SELECTOR.0 as _;
+        Self(tf)
     }
 
     /// Gets the instruction pointer.
-    pub const fn get_ip(&self) -> u64 {
+    pub const fn get_ip(&self) -> usize {
         self.0.rip as _
     }
 
     /// Gets the stack pointer.
-    pub const fn get_sp(&self) -> u64 {
+    pub const fn get_sp(&self) -> usize {
         self.0.rsp as _
     }
 
     /// Sets the instruction pointer.
-    pub const fn set_ip(&mut self, pc: u64) {
-        self.0.rip = pc;
+    pub const fn set_ip(&mut self, rip: usize) {
+        self.0.rip = rip as _;
     }
 
     /// Sets the stack pointer.
-    pub const fn set_sp(&mut self, sp: u64) {
-        self.0.rsp = sp;
+    pub const fn set_sp(&mut self, rsp: usize) {
+        self.0.rsp = rsp as _;
     }
 
     /// Sets the return value register.
-    pub const fn set_retval(&mut self, a0: u64) {
-        self.0.regs.rax = a0;
+    pub const fn set_retval(&mut self, rax: usize) {
+        self.0.rax = rax as _;
     }
 
     /// Enters user space.
@@ -134,62 +147,33 @@ impl UspaceContext {
     /// This function is unsafe because it changes processor mode and the stack.
     #[no_mangle]
     pub unsafe fn enter_uspace(&self, kstack_top: VirtAddr) -> ! {
-        interrupts::disable();
-        let tf = &self.0;
-        let mut rsp = kstack_top.as_usize() as u64;
-
-        #[inline(always)]
-        unsafe fn push(mut rsp: u64, val: u64) -> u64 {
-            rsp -= 8;
-            *(rsp as *mut u64) = val;
-            rsp
+        super::disable_irqs();
+        assert_eq!(super::tss_get_rsp0(), kstack_top);
+        unsafe {
+            core::arch::asm!("
+                mov     rsp, {tf}
+                pop     rax
+                pop     rcx
+                pop     rdx
+                pop     rbx
+                pop     rbp
+                pop     rsi
+                pop     rdi
+                pop     r8
+                pop     r9
+                pop     r10
+                pop     r11
+                pop     r12
+                pop     r13
+                pop     r14
+                pop     r15
+                add     rsp, 16     // skip vector, error_code
+                swapgs
+                iretq",
+                tf = in(reg) &self.0,
+                options(noreturn),
+            )
         }
-        rsp = push(rsp, tf.ss);
-        rsp = push(rsp, tf.rsp);
-        rsp = push(rsp, tf.rflags);
-        rsp = push(rsp, tf.cs);
-        rsp = push(rsp, tf.rip);
-
-        rsp = push(rsp, tf.regs.rax);
-        rsp = push(rsp, tf.regs.rbx);
-        rsp = push(rsp, tf.regs.rcx);
-        rsp = push(rsp, tf.regs.rdx);
-        rsp = push(rsp, tf.regs.rsi);
-        rsp = push(rsp, tf.regs.rdi);
-        rsp = push(rsp, tf.regs.rbp);
-        rsp = push(rsp, tf.regs.r8);
-        rsp = push(rsp, tf.regs.r9);
-        rsp = push(rsp, tf.regs.r10);
-        rsp = push(rsp, tf.regs.r11);
-        rsp = push(rsp, tf.regs.r12);
-        rsp = push(rsp, tf.regs.r13);
-        rsp = push(rsp, tf.regs.r14);
-        rsp = push(rsp, tf.regs.r15);
-
-        // 切栈并跳到用户态
-        core::arch::asm!(
-            // "swapgs",
-            "mov    rsp, {stack}",
-            "pop    r15",
-            "pop    r14",
-            "pop    r13",
-            "pop    r12",
-            "pop    r11",
-            "pop    r10",
-            "pop    r9",
-            "pop    r8",
-            "pop    rbp",
-            "pop    rdi",
-            "pop    rsi",
-            "pop    rdx",
-            "pop    rcx",
-            "pop    rbx",
-            "pop    rax",
-            "swapgs",
-            "iretq",
-            stack = in(reg) rsp,
-            options(noreturn),
-        )
     }
 }
 
@@ -290,23 +274,36 @@ pub struct TaskContext {
     pub rsp: u64,
     /// Thread Local Storage (TLS).
     pub fs_base: usize,
-    /// The root of the page table (CR3 on x86_64, SATP on riscv).
-    pub page_table_root: PhysAddr,
+    /// The `gs_base` register value.
+    #[cfg(feature = "uspace")]
+    pub gs_base: usize,
     /// Extended states, i.e., FP/SIMD states.
     #[cfg(feature = "fp_simd")]
     pub ext_state: ExtendedState,
+    /// The `CR3` register value, i.e., the page table root.
+    #[cfg(feature = "uspace")]
+    pub cr3: memory_addr::PhysAddr,
 }
 
 impl TaskContext {
-    /// Creates a new default context for a new task.
-    pub const fn new() -> Self {
+    /// Creates a dummy context for a new task.
+    ///
+    /// Note the context is not initialized, it will be filled by [`switch_to`]
+    /// (for initial tasks) and [`init`] (for regular tasks) methods.
+    ///
+    /// [`init`]: TaskContext::init
+    /// [`switch_to`]: TaskContext::switch_to
+    pub fn new() -> Self {
         Self {
             kstack_top: va!(0),
             rsp: 0,
             fs_base: 0,
-            page_table_root: PhysAddr::from_usize(0),
+            #[cfg(feature = "uspace")]
+            cr3: crate::paging::kernel_page_table_root(),
             #[cfg(feature = "fp_simd")]
             ext_state: ExtendedState::default(),
+            #[cfg(feature = "uspace")]
+            gs_base: 0,
         }
     }
 
@@ -332,15 +329,15 @@ impl TaskContext {
         self.fs_base = tls_area.as_usize();
     }
 
-    /// Changes the page table root (`cr3` register for x86_64).
+    /// Changes the page table root (`CR3` register for x86_64).
     ///
     /// If not set, the kernel page table root is used (obtained by
     /// [`axhal::paging::kernel_page_table_root`][1]).
     ///
     /// [1]: crate::paging::kernel_page_table_root
     #[cfg(feature = "uspace")]
-    pub fn set_page_table_root(&mut self, cr3: PhysAddr) {
-        self.page_table_root = cr3;
+    pub fn set_page_table_root(&mut self, cr3: memory_addr::PhysAddr) {
+        self.cr3 = cr3;
     }
 
     /// Switches to another task.
@@ -353,10 +350,21 @@ impl TaskContext {
             self.ext_state.save();
             next_ctx.ext_state.restore();
         }
-        #[cfg(feature = "tls")]
-        {
+        #[cfg(any(feature = "tls", feature = "uspace"))]
+        unsafe {
             self.fs_base = super::read_thread_pointer();
-            unsafe { super::write_thread_pointer(next_ctx.fs_base) };
+            super::write_thread_pointer(next_ctx.fs_base);
+        }
+        #[cfg(feature = "uspace")]
+        unsafe {
+            // Switch gs base for user space.
+            self.gs_base = x86::msr::rdmsr(x86::msr::IA32_KERNEL_GSBASE) as usize;
+            x86::msr::wrmsr(x86::msr::IA32_KERNEL_GSBASE, next_ctx.gs_base as u64);
+            super::tss_set_rsp0(next_ctx.kstack_top);
+            debug!("tss_set_rsp0({:#x})", next_ctx.kstack_top);
+            if next_ctx.cr3 != self.cr3 {
+                super::write_page_table_root(next_ctx.cr3);
+            }
         }
         unsafe { context_switch(&mut self.rsp, &next_ctx.rsp) }
     }
@@ -366,6 +374,7 @@ impl TaskContext {
 unsafe extern "C" fn context_switch(_current_stack: &mut u64, _next_stack: &u64) {
     naked_asm!(
         "
+        .code64
         push    rbp
         push    rbx
         push    r12

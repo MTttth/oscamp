@@ -37,4 +37,4 @@ clean:
 
 FORCE:
 
-.PHONY: FORCE
+.PHONY: $(TARGET_ELF)

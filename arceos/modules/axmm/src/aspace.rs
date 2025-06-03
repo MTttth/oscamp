@@ -74,6 +74,7 @@ impl AddrSpace {
             return ax_err!(InvalidInput, "address space overlap");
         }
         self.pt.copy_from(&other.pt, other.base(), other.size());
+        debug!("Copied mappings from {:?} to {:?}", other, self);
         Ok(())
     }
 
@@ -113,7 +114,6 @@ impl AddrSpace {
         if !start_vaddr.is_aligned_4k() || !start_paddr.is_aligned_4k() || !is_aligned_4k(size) {
             return ax_err!(InvalidInput, "address not aligned");
         }
-
         let offset = start_vaddr.as_usize() - start_paddr.as_usize();
         self.pt
             .map_region(

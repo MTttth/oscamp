@@ -2,6 +2,9 @@ mod context;
 mod gdt;
 mod idt;
 
+#[cfg(feature = "uspace")]
+pub mod syscall;
+
 #[cfg(target_os = "none")]
 mod trap;
 
@@ -14,9 +17,8 @@ use x86_64::instructions::interrupts;
 #[cfg(feature = "uspace")]
 pub use self::context::UspaceContext;
 pub use self::context::{ExtendedState, FxsaveArea, TaskContext, TrapFrame};
-pub use self::gdt::GdtStruct;
+pub use self::gdt::{GdtStruct, tss_get_rsp0, tss_set_rsp0};
 pub use self::idt::IdtStruct;
-pub use x86_64::structures::tss::TaskStateSegment;
 
 /// Allows the current CPU to respond to interrupts.
 #[inline]

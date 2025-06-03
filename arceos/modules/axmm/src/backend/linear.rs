@@ -38,7 +38,6 @@ impl Backend {
         pt: &mut PageTable,
         _pa_va_offset: usize,
     ) -> bool {
-        debug!("unmap_linear: [{:#x}, {:#x})", start, start + size);
         pt.unmap_region(start, size, true)
             .map(|tlb| tlb.ignore()) // flush each page on unmap, do not flush the entire TLB.
             .is_ok()

@@ -32,6 +32,7 @@ fn current_cpu_id() -> usize {
     }
 }
 
+#[no_mangle]
 unsafe extern "C" fn rust_entry(magic: usize, _mbi: usize) {
     // TODO: handle multiboot info
     if magic == self::boot::MULTIBOOT_BOOTLOADER_MAGIC {
@@ -40,6 +41,10 @@ unsafe extern "C" fn rust_entry(magic: usize, _mbi: usize) {
         self::uart16550::init();
         self::dtables::init_primary();
         self::time::init_early();
+
+        #[cfg(feature = "uspace")]
+        crate::arch::syscall::init_syscall();
+
         rust_main(current_cpu_id(), 0);
     }
 }

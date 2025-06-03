@@ -157,6 +157,7 @@ pub fn sleep_until(deadline: axhal::time::TimeValue) {
 
 /// Exits the current task.
 pub fn exit(exit_code: i32) -> ! {
+    debug!("task {} exiting with code {}", current().id_name(), exit_code);
     RUN_QUEUE.lock().exit_current(exit_code)
 }
 
