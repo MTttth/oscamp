@@ -25,6 +25,7 @@ kernel-aspace-base = "0xffff_ff80_0000_0000"
 kernel-aspace-size = "0x0000_007f_ffff_f000"
 # MMIO regions with format (`base_paddr`, `size`).
 mmio-regions = [
+    ["0x2200_0000", "0x0200_0000"], # PFLASH
     ["0xb000_0000", "0x1000_0000"], # PCI config space
     ["0xfe00_0000", "0xc0_0000"],   # PCI devices
     ["0xfec0_0000", "0x1000"],      # IO APIC

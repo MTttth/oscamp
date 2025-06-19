@@ -17,8 +17,8 @@ use x86_64::instructions::interrupts;
 #[cfg(feature = "uspace")]
 pub use self::context::UspaceContext;
 pub use self::context::{ExtendedState, FxsaveArea, TaskContext, TrapFrame};
-pub use self::gdt::{GdtStruct, tss_get_rsp0, tss_set_rsp0};
-pub use self::idt::IdtStruct;
+pub use self::gdt::{GdtStruct, tss_get_rsp0, tss_set_rsp0, TSS, GDT};
+pub use self::idt::{IdtStruct, IDT};
 
 /// Allows the current CPU to respond to interrupts.
 #[inline]

@@ -52,4 +52,4 @@ spin = { version = "0.9" }
 lazy_static = { version = "1.5", features = ["spin_no_std"] }
 
 [build-dependencies]
-bindgen ={ version = "0.69" }
+bindgen ={ version = "0.71" }

@@ -14,7 +14,9 @@ fn console_write_bytes(buf: &[u8]) -> AxResult<usize> {
     Ok(buf.len())
 }
 
+#[derive(Debug)]
 struct StdinRaw;
+#[derive(Debug)]
 struct StdoutRaw;
 
 impl Read for StdinRaw {

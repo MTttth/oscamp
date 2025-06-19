@@ -167,7 +167,7 @@ impl UspaceContext {
                 pop     r13
                 pop     r14
                 pop     r15
-                add     rsp, 16     // skip vector, error_code
+                add     rsp, 16
                 swapgs
                 iretq",
                 tf = in(reg) &self.0,
@@ -352,8 +352,10 @@ impl TaskContext {
         }
         #[cfg(any(feature = "tls", feature = "uspace"))]
         unsafe {
+            debug!("current fs_base: {:#x}", self.fs_base);
             self.fs_base = super::read_thread_pointer();
             super::write_thread_pointer(next_ctx.fs_base);
+            debug!("Switching thread pointer: {:#x} => {:#x}", self.fs_base, next_ctx.fs_base);
         }
         #[cfg(feature = "uspace")]
         unsafe {
@@ -361,7 +363,6 @@ impl TaskContext {
             self.gs_base = x86::msr::rdmsr(x86::msr::IA32_KERNEL_GSBASE) as usize;
             x86::msr::wrmsr(x86::msr::IA32_KERNEL_GSBASE, next_ctx.gs_base as u64);
             super::tss_set_rsp0(next_ctx.kstack_top);
-            debug!("tss_set_rsp0({:#x})", next_ctx.kstack_top);
             if next_ctx.cr3 != self.cr3 {
                 super::write_page_table_root(next_ctx.cr3);
             }

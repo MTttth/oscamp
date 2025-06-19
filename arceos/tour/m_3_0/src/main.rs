@@ -45,7 +45,12 @@ fn main() {
     // Let's kick off the user process.
     let user_task = task::spawn_user_task(
         Arc::new(Mutex::new(uspace)),
-        UspaceContext::new(entry, ustack_top),
+        #[cfg(target_arch = "riscv64")]
+        UspaceContext::new(entry.into(), ustack_top),
+        #[cfg(target_arch = "aarch64")]
+        UspaceContext::new(entry.into(), ustack_top, 0),
+        #[cfg(target_arch = "x86_64")]
+        UspaceContext::new(entry, ustack_top, 0),
     );
 
     // Wait for user process to exit ...
@@ -63,6 +68,12 @@ fn init_user_stack(uspace: &mut AddrSpace, populating: bool) -> io::Result<VirtA
     uspace.map_alloc(
         ustack_vaddr,
         crate::USER_STACK_SIZE,
+        MappingFlags::READ | MappingFlags::WRITE | MappingFlags::USER,
+        populating,
+    ).unwrap();
+    uspace.map_alloc(
+        VirtAddr::from_usize(4096),
+        4096,
         MappingFlags::READ | MappingFlags::WRITE | MappingFlags::USER,
         populating,
     ).unwrap();

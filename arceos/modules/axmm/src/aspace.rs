@@ -74,7 +74,6 @@ impl AddrSpace {
             return ax_err!(InvalidInput, "address space overlap");
         }
         self.pt.copy_from(&other.pt, other.base(), other.size());
-        debug!("Copied mappings from {:?} to {:?}", other, self);
         Ok(())
     }
 

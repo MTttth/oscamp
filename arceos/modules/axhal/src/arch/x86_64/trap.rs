@@ -13,6 +13,8 @@ const IRQ_VECTOR_START: u8 = 0x20;
 const IRQ_VECTOR_END: u8 = 0xff;
 
 fn handle_page_fault(tf: &TrapFrame) {
+    debug!("Page fault at {:#x}, error_code={:#x}", tf.rip, tf.error_code);
+    debug!("TrapFrame: {:#x?}", tf);
     let access_flags = err_code_to_flags(tf.error_code)
         .unwrap_or_else(|e| panic!("Invalid #PF error code: {:#x}", e));
     let vaddr = va!(unsafe { cr2() });
@@ -32,7 +34,10 @@ fn handle_page_fault(tf: &TrapFrame) {
 #[unsafe(no_mangle)]
 fn x86_trap_handler(tf: &mut TrapFrame) {
     match tf.vector as u8 {
-        PAGE_FAULT_VECTOR => handle_page_fault(tf),
+        PAGE_FAULT_VECTOR => {
+            handle_page_fault(tf);
+            // tf.rip = tf.rip.wrapping_add(13);
+        }
         BREAKPOINT_VECTOR => debug!("#BP @ {:#x} ", tf.rip),
         GENERAL_PROTECTION_FAULT_VECTOR => {
             panic!(
@@ -44,6 +49,9 @@ fn x86_trap_handler(tf: &mut TrapFrame) {
         LEGACY_SYSCALL_VECTOR => super::syscall::x86_syscall_handler(tf),
         IRQ_VECTOR_START..=IRQ_VECTOR_END => {
             handle_trap!(IRQ, tf.vector as _);
+        }
+        INVALID_OPCODE_VECTOR => {
+            tf.rip = tf.rip.wrapping_add(4);
         }
         _ => {
             panic!(

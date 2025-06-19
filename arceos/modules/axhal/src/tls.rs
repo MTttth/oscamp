@@ -52,6 +52,7 @@
 extern crate alloc;
 
 use memory_addr::align_up;
+use x86_64::registers::debug;
 
 use core::alloc::Layout;
 use core::ptr::NonNull;
@@ -116,7 +117,15 @@ impl TlsArea {
             // initialize TCB
             init_tcb(area_base);
         }
-
+        debug!(
+            "=== TlsArea alloc: base = {:#x}, size = {:#x}, align = {:#x}, \
+            static_tls_offset = {:#x}, tp_offset = {:#x} ===",
+            area_base as usize,           // base 指针
+            layout.size(),           // 分配的总大小
+            layout.align(),          // 对齐值
+            static_tls_offset(),          // 静态 TLS 数据的偏移
+            tp_offset(),                  // 线程指针偏移
+        );
         Self {
             base: NonNull::new(area_base).unwrap(),
             layout,

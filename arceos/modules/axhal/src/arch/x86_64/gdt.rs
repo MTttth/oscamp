@@ -9,10 +9,10 @@ use x86_64::{PrivilegeLevel, addr::VirtAddr};
 
 #[unsafe(no_mangle)]
 #[percpu::def_percpu]
-static TSS: TaskStateSegment = TaskStateSegment::new();
+pub static TSS: LazyInit<TaskStateSegment> = LazyInit::new();
 
 #[percpu::def_percpu]
-static GDT: LazyInit<GdtStruct> = LazyInit::new();
+pub static GDT: LazyInit<GdtStruct> = LazyInit::new();
 
 /// A wrapper of the Global Descriptor Table (GDT) with maximum 16 entries.
 #[repr(align(16))]
